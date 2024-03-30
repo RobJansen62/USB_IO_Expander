@@ -47,12 +47,16 @@ if __name__ == "__main__":
     while True:
 
         # All pins high.
-        if not pin_byte_write(0xFF):
+        if pin_byte_write(0xFF):
+            print("Set all pins to HIGH.")
+        else:
             print("Could not set all pins to HIGH.")
         time.sleep(1)
 
         # All pins low.
-        if not pin_byte_write(0x00):
+        if pin_byte_write(0x00):
+            print("Set all pins to LOW.")
+        else:
             print("Could not set all pins to LOW.")
         time.sleep(1)
 
@@ -63,10 +67,6 @@ if __name__ == "__main__":
         for pin in range(8):
            pin_bit_write(pin, 0)
            time.sleep(0.5)
-
-        # Force an error by using a non-existent pin.
-        if not pin_bit_write(8, 0):
-            print("Error since pin 8 does not exist.")
 
     serial_end()
     sys.exit(0)

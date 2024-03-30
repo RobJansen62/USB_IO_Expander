@@ -14,7 +14,6 @@ from usb_io_expander import default_comport, get_default_comport, serial_init, s
 
 # There are 5 ADC channels: 3, 4, 5, 6 and 7.
 selected_adc = 4  # Used at initialization
-changed_adc = 3   # Just used for testing the channel change.
 
 if __name__ == "__main__":
     # Main program starts here.
@@ -45,11 +44,6 @@ if __name__ == "__main__":
     else:
         print("Could not enable ADC")
         sys.exit(1)
-
-    # Change the channel. This is just for testing.
-    if not adc_channel(changed_adc):
-        print("Could not select a new ADC channel.")
-        exit(1)
 
     while True:
         # Read the ADC.

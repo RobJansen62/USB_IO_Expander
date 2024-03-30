@@ -340,10 +340,10 @@ function pin_byte_read() return bit is
  
    if command_ok then 
       port_value = PORTC & 0b0011_1111
-      if pin_C4 then
+      if pin_A4 then
          port_value = port_value | 0b0100_0000        
       end if 
-      if pin_C5 then
+      if pin_A5 then
          port_value = port_value | 0b1000_0000        
       end if 
       flush_data_buffer()

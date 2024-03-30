@@ -11,7 +11,7 @@
 import sys
 import time
 from usb_io_expander import default_comport, get_default_comport, serial_init, serial_end, spi_init, \
-                            spi_write, spi_read, set_pin_bit_direction, set_pin_bit_mode, pin_bit_write
+                            spi_write, spi_read, pin_bit_direction, pin_bit_mode, pin_bit_write
 
 spi_address_write = 0x40  # A0, A1 connected to GND.
 spi_address_read = 0x41  # A0, A1 connected to GND.
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     if not serial_init(comport):
         sys.exit(1)
 
-    # Select SPI mode 00 and clock OSC/4 Note, does not work for higher lower speeds!
+    # Select SPI mode 00 and clock OSC/4 Note, does not work for higher speeds!
     if spi_init(0, 2):
         print("SPI initialized")
     else:
@@ -43,14 +43,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Device select is connected to pin 7 which is C3 which is pin 3. Set to digital output.
-    if set_pin_bit_direction(spi_select, 0):
+    if pin_bit_direction(spi_select, 0):
         print("Device select pin set to output")
     else:
         print("Could not set pin SS to output")
         sys.exit(1)
 
     # Device select must be a digital pin.
-    if set_pin_bit_mode(spi_select, 0):
+    if pin_bit_mode(spi_select, 0):
         print("Device select set to digital pin.")
     else:
         print("Could not set pin device select to digital pin.")
