@@ -1,0 +1,144 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander Analog to Digital Converter functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for ADC control. For conversion Frc is 
+;              used. The ADC channel can be selected at initialization.
+; 
+;
+
+include adc
+include usb_io_expander_pins
+
+var byte _adc_channel
+var bit _adc_initialized = FALSE
+
+; Switch the input and the ADC channel to the given channel if available.
+function _adc_set_input_channel(byte in channel) return bit is
+
+   var bit command_ok 
+
+   command_ok = _adc_initialized
+   -- Set ADC input pin and set it to analog input.
+   case channel of
+
+      3:
+      block 
+         _pin_set_direction(EXPANDER_PIN_A4, input)
+         command_ok = _pin_set_analog(EXPANDER_PIN_A4)
+      end block
+
+      4: 
+      block 
+         _pin_set_direction(EXPANDER_PIN_C0, input)
+         command_ok = _pin_set_analog(EXPANDER_PIN_C0)
+      end block
+
+      5: block 
+         _pin_set_direction(EXPANDER_PIN_C1, input)
+         command_ok = _pin_set_analog(EXPANDER_PIN_C1)
+      end block
+
+      6: block 
+         _pin_set_direction(EXPANDER_PIN_C2, input)
+         command_ok = _pin_set_analog(EXPANDER_PIN_C2)
+      end block
+ 
+      7: block 
+         _pin_set_direction(EXPANDER_PIN_C3, input)
+         command_ok = _pin_set_analog(EXPANDER_PIN_C3)
+      end block
+
+      otherwise
+         block command_ok = FALSE end block 
+
+   end case
+
+   return command_ok
+
+end function
+
+
+; Set the channel to the selected channel in the item buffer. 
+; Returns TRUE the the given channel is correct.
+function adc_set_channel() return bit is
+ 
+   var byte channel
+   var bit command_ok = FALSE
+
+   if get_byte_from_buffer(channel) then 
+      if _adc_set_input_channel(channel) then
+         _adc_channel = channel
+         command_ok = _adc_initialized
+      end if 
+   end if 
+
+   return command_ok
+       
+ end function
+
+
+; Init the ADC hardware interface and using the ginen ADC channel
+; in the item buffer. Returns TRUE when the right ADC input was selected.
+; Frc is used as conversion clock and VDD is selected as voltage
+; reference. The ADC is disabled.
+function adc_initialize() return bit is
+
+   var byte item, channel
+   var bit command_ok = FALSE
+
+   ; Get ADC input channel.
+   _adc_initialized = TRUE ; Assumed since used by adc_set_channel()
+   if adc_set_channel() then
+      ADCON1_ADPREF = 0b00 ; VDD is Vref.
+      ADCON1_ADCS = 0b111  ; Frc is used for conversion.
+      adc_init()
+      command_ok = TRUE
+   else
+      _adc_initialized = FALSE
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Enable the ADC.
+procedure adc_enable() is
+
+   ADCON0_ADON = TRUE
+
+end procedure
+
+
+; Disable the ADC.
+procedure adc_disable() is
+
+    ADCON0_ADON = FALSE
+
+end procedure
+
+
+; Start the ADC and get the ADC value. Returns TRUE
+; after conversion. The ADC word value is stored in the 
+; data buffer, high byte first. The ADC must be initialized.
+function adc_read() return bit is
+
+  var word measure
+  var byte adc_low at measure
+  var byte adc_high at measure + 1
+  var bit command_ok
+
+  if _adc_initialized then
+     flush_data_buffer()
+ 	  measure = adc_read_high_res(_adc_channel)
+     command_ok = add_data_item(adc_high)
+     command_ok = command_ok & add_data_item(adc_low)
+   else
+      command_ok = FALSE
+   end if
+
+   return command_ok 
+
+end function

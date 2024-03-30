@@ -1,0 +1,80 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander Digital to Analog Converter functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for DAC control. Note the following:
+;              -) DAC Output 1 is on pin c2
+;              -) DAC Output 2 is on pin c3
+;
+include usb_io_expander_pins
+
+var byte _dac_channel
+var bit _dac_initialized = FALSE
+
+; Init the DAC hardware interface and set the DAC output pin.
+; Returns TRUE when the right DAC output was selected.
+; VDD is used as reference. The DAC is disabled.
+function dac_init() return bit is
+
+   var byte channel
+   var bit command_ok = TRUE
+
+   ; Get DAC output channel.
+   if get_byte_from_buffer(channel) then 
+      if (channel == 1) then
+         DACCON0 = 0b0010_0000
+         _pin_set_direction(EXPANDER_PIN_C2, output)
+         command_ok = _pin_set_digital(EXPANDER_PIN_C2)
+         _dac_channel = channel
+         _dac_initialized = TRUE
+      elsif (channel == 2) then
+         DACCON0 = 0b0001_0000
+         _pin_set_direction(EXPANDER_PIN_C3, output)
+         command_ok = _pin_set_digital(EXPANDER_PIN_C3)
+         _dac_channel = channel
+        _dac_initialized = TRUE
+      else
+         command_ok = FALSE
+         _dac_initialized = FALSE
+      end if 
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Enable the DAC.
+procedure dac_enable() is
+
+   DACCON0_DACEN = TRUE
+
+end procedure
+
+
+; Disable the DAC.
+procedure dac_disable() is
+
+   DACCON0_DACEN = FALSE
+
+end procedure
+
+; Set the DAC to the given output. Returns TRUE when the 
+; line item value is in range 0..31. DAC must be initialized.
+function dac_write() return bit is
+
+  var byte value 
+  var bit command_ok
+
+   command_ok = get_byte_from_buffer(value) & _dac_initialized
+   if (value <= 31) & command_ok then
+      DACCON1 = value
+      command_ok = TRUE
+   else
+      command_ok = FALSE
+   end if
+
+   return command_ok 
+
+end function

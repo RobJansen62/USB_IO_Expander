@@ -1,0 +1,355 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander Pins
+; Author: Rob Jansen, Copyright (c) 2023..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for all pin functionality.
+;       
+
+const byte NR_OF_PINS = 8
+; Pins are from 0..7 defined as follows:
+const byte EXPANDER_PIN_C0 = 0
+const byte EXPANDER_PIN_C1 = 1
+const byte EXPANDER_PIN_C2 = 2
+const byte EXPANDER_PIN_C3 = 3
+const byte EXPANDER_PIN_C4 = 4
+const byte EXPANDER_PIN_C5 = 5
+const byte EXPANDER_PIN_A4 = 6
+const byte EXPANDER_PIN_A5 = 7
+
+const bit PIN_ANALOG  = TRUE
+const bit PIN_DIGITAL = FALSE
+
+
+; Set the given pin to analog. Return TRUE if the pin has that option.
+function _pin_set_analog(byte in pin) return bit is
+
+   var bit available = TRUE
+
+   case pin of
+      EXPANDER_PIN_C0: block ANSELC_ANSC0 = TRUE end block
+      EXPANDER_PIN_C1: block ANSELC_ANSC1 = TRUE end block 
+      EXPANDER_PIN_C2: block ANSELC_ANSC2 = TRUE end block 
+      EXPANDER_PIN_C3: block ANSELC_ANSC3 = TRUE end block 
+      EXPANDER_PIN_A4: block ANSELA_ANSA4 = TRUE end block 
+
+      otherwise
+         block available = FALSE end block
+
+   end case
+
+   return available
+
+end function
+
+
+; Set the given pin to digital. Return TRUE if the pin has that option.
+function _pin_set_digital(byte in pin) return bit is
+
+   var bit available = TRUE
+
+   case pin of
+      EXPANDER_PIN_C0: block ANSELC_ANSC0 = FALSE end block
+      EXPANDER_PIN_C1: block ANSELC_ANSC1 = FALSE end block 
+      EXPANDER_PIN_C2: block ANSELC_ANSC2 = FALSE end block 
+      EXPANDER_PIN_C3: block ANSELC_ANSC3 = FALSE end block 
+      EXPANDER_PIN_A4: block ANSELA_ANSA4 = FALSE end block 
+
+      otherwise
+         block available = FALSE end block
+
+   end case
+
+   return available
+
+end function
+
+
+; Set the given pin to the given direction. Direction TRUE equals pin is set 
+; to INPUT, direction FALSE equals pin is set to OUTPUT.
+procedure _pin_set_direction(byte in pin, bit in direction) is
+
+   case pin of
+      EXPANDER_PIN_C0: block pin_C0_direction = direction end block
+      EXPANDER_PIN_C1: block pin_C1_direction = direction end block 
+      EXPANDER_PIN_C2: block pin_C2_direction = direction end block 
+      EXPANDER_PIN_C3: block pin_C3_direction = direction end block 
+      EXPANDER_PIN_C4: block pin_C4_direction = direction end block 
+      EXPANDER_PIN_C5: block pin_C5_direction = direction end block 
+      EXPANDER_PIN_A4: block pin_A4_direction = direction end block 
+      EXPANDER_PIN_A5: block pin_A5_direction = direction end block 
+   end case
+
+end procedure
+
+
+; Set the given pin to the given value. 
+procedure _pin_set_value(byte in pin, bit in value) is
+
+   case pin of
+      EXPANDER_PIN_C0: block pin_C0 = value end block 
+      EXPANDER_PIN_C1: block pin_C1 = value end block
+      EXPANDER_PIN_C2: block pin_C2 = value end block 
+      EXPANDER_PIN_C3: block pin_C3 = value end block 
+      EXPANDER_PIN_C4: block pin_C4 = value end block 
+      EXPANDER_PIN_C5: block pin_C5 = value end block 
+      EXPANDER_PIN_A4: block pin_A4 = value end block 
+      EXPANDER_PIN_A5: block pin_A5 = value end block 
+   end case
+
+end procedure
+
+
+; Set the given direction the given pin. Return TRUE when OK.
+; Direction = 0x00 is OUTPUT, direction = 0x01 is INPUT.
+function pin_bit_direction() return bit is
+
+   var byte pin, direction
+   var bit command_ok = FALSE
+
+   ; Get pin number and pin direction. 
+   if get_byte_from_buffer(pin) then 
+      if (pin < NR_OF_PINS) then
+         if get_byte_from_buffer(direction) then 
+            if (direction == 0x00) | (direction == 0x01) then
+               _pin_set_direction(pin, (direction == 0x01))
+               command_ok = TRUE
+            end if      
+         end if    
+      end if
+   end if
+
+   return command_ok
+
+end function
+
+
+; Set the mode of the given pin to analog or digital. Return TRUE when OK.
+; Mode = 0x00 is digital, mode = 0x01 is analog..
+function pin_bit_mode() return bit is
+
+   var byte pin, mode
+   var bit command_ok = FALSE
+
+   ; Get pin number and pin direction. 
+   if get_byte_from_buffer(pin) then 
+      if (pin < NR_OF_PINS) then
+         if get_byte_from_buffer(mode) then 
+            if (mode == 0x00) then
+               command_ok = _pin_set_digital(pin)
+            elsif (mode == 0x01) then
+               command_ok = _pin_set_analog(pin)
+            end if      
+         end if    
+      end if
+   end if
+
+   return command_ok
+
+end function
+
+
+; Enable of disable the weak pull-up for the given pin. 
+; Disabled = 0x00, enabled = 0x01. Only two ports have this option.
+; Returns TRUE when OK.
+function pin_bit_pull_up() return bit is
+
+   var byte pin, value
+   var bit bit_value, command_ok
+
+   ; Get pin number and pin value.
+   command_ok = get_byte_from_buffer(pin)
+   command_ok = command_ok & ((pin == EXPANDER_PIN_A4) | (pin == EXPANDER_PIN_A5))
+   command_ok = command_ok & get_byte_from_buffer(value) 
+   command_ok = command_ok & ((value == 0x00) | (value == 0x01))
+   if command_ok then
+      bit_value = (value == 0x01)
+      if (pin == EXPANDER_PIN_A4) then
+         WPUA_WPUA4 = bit_value
+      else 
+         WPUA_WPUA5 = bit_value
+      end if
+   end if
+
+   return command_ok
+
+end function
+
+
+; Write the given value to the given pin. Return TRUE when OK.
+function pin_bit_write() return bit is
+
+   var byte pin, value
+   var bit command_ok = FALSE
+
+   ; Get pin number and pin value.
+   if get_byte_from_buffer(pin) then 
+      if (pin < NR_OF_PINS) then
+         if get_byte_from_buffer(value) then 
+            if (value == 0x00) | (value == 0x01) then
+               _pin_set_value(pin, (value == 0x01))
+               command_ok = TRUE
+            end if      
+         end if    
+      end if
+   end if
+
+   return command_ok
+
+end function
+
+
+; Return the status of the given pin. The pin must have been set to input 
+; otherwise FALSE is returned.
+function pin_bit_read() return bit is
+
+   var byte pin
+   var bit status
+   var bit command_ok = FALSE
+
+   ; Get pin number. 
+   if get_byte_from_buffer(pin) then 
+      if (pin < NR_OF_PINS) then
+         command_ok = TRUE
+      end if
+   end if
+
+   if command_ok then 
+      case pin of
+
+         EXPANDER_PIN_C0: 
+         block 
+            command_ok = pin_C0_direction 
+            status = pin_C0 
+         end block 
+ 
+         EXPANDER_PIN_C1: 
+         block 
+            command_ok = pin_C1_direction 
+            status = pin_C1 
+         end block
+ 
+         EXPANDER_PIN_C2: 
+         block 
+            command_ok = pin_C2_direction 
+            status = pin_C2 
+         end block 
+ 
+         EXPANDER_PIN_C3: 
+         block 
+            command_ok = pin_C3_direction 
+            status = pin_C3 
+         end block 
+ 
+         EXPANDER_PIN_C4: 
+         block 
+            command_ok = pin_C4_direction 
+            status = pin_C4 
+         end block 
+  
+         EXPANDER_PIN_C5: 
+         block 
+            command_ok = pin_C5_direction 
+            status = pin_C5 
+         end block 
+ 
+         EXPANDER_PIN_A4: 
+         block 
+            command_ok = pin_A4_direction 
+            status = pin_A4 
+         end block 
+ 
+         EXPANDER_PIN_A5: 
+         block 
+            command_ok = pin_A5_direction 
+            status = pin_A5 
+         end block 
+
+     end case
+   end if 
+
+   if command_ok then
+      flush_data_buffer()
+      if status then
+         command_ok = add_data_item(0x01)
+      else 
+         command_ok = add_data_item(0x00)
+      end if 
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Handle the pin byte direction command.
+function pin_byte_direction() return bit is
+
+   var byte hex_value, pin
+   var bit direction
+   var bit command_ok = FALSE
+
+   ; Get the byte value.
+   if get_byte_from_buffer(hex_value) then
+      for NR_OF_PINS using pin loop
+         direction = ((hex_value & 0x01) > 0)
+         _pin_set_direction(pin, direction)
+         hex_value = hex_value >> 1
+      end loop
+      command_ok = TRUE
+   end if
+
+   return command_ok
+
+end function
+
+
+; Write the given value to the port. Return TRUE when OK.
+function pin_byte_write() return bit is
+
+   var byte hex_value, pin
+   var bit value
+   var bit command_ok = FALSE
+
+   ; Get the byte value.
+   if get_byte_from_buffer(hex_value) then
+      for NR_OF_PINS using pin loop
+         value = ((hex_value & 0x01) > 0)
+         _pin_set_value(pin, value)
+         hex_value = hex_value >> 1
+      end loop
+      command_ok = TRUE
+   end if
+
+  return command_ok
+
+end function
+
+
+; Read the input pins of the ports and return as a byte value. 
+; The port must have been set to input otherwise FALSE is returned.
+function pin_byte_read() return bit is
+
+   var byte port_value
+   var bit command_ok
+
+   ; All pins must be input.
+   command_ok = pin_C0_direction & pin_C1_direction & pin_C2_direction &
+                pin_C3_direction & pin_C4_direction & pin_C5_direction &
+                pin_A4_direction & pin_A5_direction
+ 
+   if command_ok then 
+      port_value = PORTC & 0b0011_1111
+      if pin_C4 then
+         port_value = port_value | 0b0100_0000        
+      end if 
+      if pin_C5 then
+         port_value = port_value | 0b1000_0000        
+      end if 
+      flush_data_buffer()
+      command_ok = add_data_item(port_value)
+   end if 
+
+   return command_ok
+
+end function

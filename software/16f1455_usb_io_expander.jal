@@ -1,0 +1,605 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander
+; Author: Rob Jansen, Copyright (c) 2023..2024, all rights reserved.
+; Compiler:  jalv25r8
+; 
+; Description: Controlling the funcionality of the PIC by commands received
+;              via the USB port. Functions provided:
+;              -) Control pins and read pins
+;              -) Control the ADC
+;              -) Control the DAC
+;              -) Control PWM
+;              -) Control the IIC interface
+;              -) Control the SPI interface
+;
+; Notes: When connecting to the USB make sure to enable RTS/CTS flow control.
+;
+;
+include 16f1455 ; Target processor.
+
+pragma target clock       48_000_000
+
+; Compiler optimization options.
+pragma opt variable_reduce yes ; Default.
+
+; Settings for external 16 MHz internal clock and system clock 48 MHz.
+pragma target OSC           INTOSC_NOCLKOUT ; Internal clock 16 MHz
+pragma target CLKOUTEN      DISABLED ; CLKOUT function is disabled
+pragma target PLLMULT       N3X      ; PLL Multipler Selection Bit, 3x Output Frequency Selected
+; Other fuses
+pragma target CPUDIV        P1       ; NO CPU system divide
+pragma target USBLSCLK      F48MHZ   ; System clock expects 48 MHz, FS/LS USB CLKENs divide-by is set to 8.
+pragma target PLLEN         ENABLED  ; 3x or 4x PLL Enabled
+pragma target FCMEN         DISABLED ; Fail-Safe Clock Monitor is disabled
+pragma target WRT           DISABLED ; Write protection off
+pragma target STVR          ENABLED  ; Stack Overflow or Underflow will cause a Reset
+pragma target LPBOR         DISABLED ; Low-Power BOR is disabled
+pragma target IESO          DISABLED ; Internal/External Switchover Mode is disabled
+pragma target PWRTE         DISABLED ; power up timer
+pragma target BROWNOUT      DISABLED ; no brownout detection
+pragma target WDT           DISABLED ; Watchdog disabled
+pragma target MCLR          Internal ; Internal reset
+pragma target LVP           ENABLED  ; Use low-voltage programming
+pragma target VOLTAGE       MAXIMUM  ; brown out voltage
+pragma target CP            DISABLED ; Program memory code protection is disabled
+OSCCON = 0b1111_1100                 ; Select PLL,3x, 16MHz internal oscillator
+
+; Enable global weak pull-up for all pins. Weak-pull up per pin is not yet active.
+OPTION_REG_WPUEN = FALSE    
+enable_digital_io() 
+
+-- Give the hardware some time to stabilize.
+_usec_delay(100_000)
+
+; ------------------- Constant declarations -----------------------------
+
+; For debugging only.
+; CONST DEBUG = TRUE
+
+; Special character declarations.
+const byte CARRIAGE_RETURN = 0x0D
+const byte LINE_FEED       = 0x0A  
+const byte SPACE           = 0x20
+
+; Command set.
+const byte COMMAND_RESET[]              = "!RES"  
+const byte COMMAND_PIN_BIT_DIRECTION[]  = "!PID" 
+const byte COMMAND_PIN_BIT_MODE[]       = "!PIM" 
+const byte COMMAND_PIN_BIT_PULL_UP[]    = "!PIP" 
+const byte COMMAND_PIN_BIT_WRITE[]      = "!PIW" 
+const byte COMMAND_PIN_BIT_READ[]       = "!PIR" 
+const byte COMMAND_PIN_BYTE_DIRECTION[] = "!PYD" 
+const byte COMMAND_PIN_BYTE_WRITE[]     = "!PYW" 
+const byte COMMAND_PIN_BYTE_READ[]      = "!PYR" 
+const byte COMMAND_IIC_INIT[]           = "!IICI" 
+const byte COMMAND_IIC_WRITE[]          = "!IICW" 
+const byte COMMAND_IIC_READ[]           = "!IICR" 
+const byte COMMAND_DAC_INIT[]           = "!DACI" 
+const byte COMMAND_DAC_ENABLE[]         = "!DACE" 
+const byte COMMAND_DAC_DISABLE[]        = "!DACD" 
+const byte COMMAND_DAC_WRITE[]          = "!DACW" 
+const byte COMMAND_SPI_INIT[]           = "!SPII" 
+const byte COMMAND_SPI_WRITE[]          = "!SPIW" 
+const byte COMMAND_SPI_READ[]           = "!SPIR" 
+const byte COMMAND_ADC_INIT[]           = "!ADCI" 
+const byte COMMAND_ADC_ENABLE[]         = "!ADCE" 
+const byte COMMAND_ADC_DISABLE[]        = "!ADCD" 
+const byte COMMAND_ADC_READ[]           = "!ADCR" 
+const byte COMMAND_ADC_CHANNEL[]        = "!ADCC" 
+const byte COMMAND_PWM_INIT[]           = "!PWMI" 
+const byte COMMAND_PWM_ENABLE[]         = "!PWME" 
+const byte COMMAND_PWM_DISABLE[]        = "!PWMD" 
+const byte COMMAND_PWM_FREQUENCY[]      = "!PWMF" 
+const byte COMMAND_PWM_DUTY_CYCLE[]     = "!PWMC" 
+const byte COMMAND_PING[]               = "!PING" 
+
+; Response values to be sent back. Will be converted to ASCII.
+const byte RESPONSE_OK      = "0" 
+const byte RESPONSE_ERROR   = "1" 
+const byte RESPONSE_UNKNOWN = "2" 
+
+; Control states for main loop.
+const byte CONTROL_IDLE               = 0
+const byte CONTROL_PIN_BIT_DIRECTION  = 1
+const byte CONTROL_PIN_BIT_MODE       = 2
+const byte CONTROL_PIN_BIT_PULL_UP    = 3
+const byte CONTROL_PIN_BIT_WRITE      = 4
+const byte CONTROL_PIN_BIT_READ       = 5
+const byte CONTROL_PIN_BYTE_DIRECTION = 6
+const byte CONTROL_PIN_BYTE_WRITE     = 7
+const byte CONTROL_PIN_BYTE_READ      = 8
+const byte CONTROL_IIC_INIT           = 9
+const byte CONTROL_IIC_WRITE          = 10
+const byte CONTROL_IIC_READ           = 11
+const byte CONTROL_DAC_INIT           = 12
+const byte CONTROL_DAC_ENABLE         = 13
+const byte CONTROL_DAC_DISABLE        = 14
+const byte CONTROL_DAC_WRITE          = 15
+const byte CONTROL_SPI_INIT           = 16
+const byte CONTROL_SPI_WRITE          = 17
+const byte CONTROL_SPI_READ           = 18
+const byte CONTROL_ADC_INIT           = 19
+const byte CONTROL_ADC_ENABLE         = 20
+const byte CONTROL_ADC_DISABLE        = 21
+const byte CONTROL_ADC_READ           = 22
+const byte CONTROL_ADC_CHANNEL        = 23
+const byte CONTROL_PWM_INIT           = 24
+const byte CONTROL_PWM_ENABLE         = 25
+const byte CONTROL_PWM_DISABLE        = 26
+const byte CONTROL_PWM_FREQUENCY      = 27
+const byte CONTROL_PWM_DUTY_CYCLE     = 28
+const byte CONTROL_RESET              = 29
+const byte CONTROL_PING               = 30
+
+; Use the USB driver on an interrupt basis. This makes it possible to use
+; delays in the main loop since timing becomes less critical.
+const USB_INTERRUPT_DRIVEN = TRUE
+; We also increase the default receive buffer of the USB library.
+const byte USB_CDC_RX_BUFFER_SIZE = 80 ; Default is 0x10.
+
+
+; ----------------- Includes go here ------------------------
+include usb_serial
+if defined(DEBUG) then
+  include print
+  include usb_io_expander_usart_debug 
+end if 
+include usb_io_expander_buffer
+include usb_io_expander_pins
+include usb_io_expander_iic
+include usb_io_expander_spi
+include usb_io_expander_dac
+include usb_io_expander_adc
+include usb_io_expander_pwm
+
+; --------------------------- Variable declarations -----------------------
+var byte data
+var byte character
+var byte control_state
+var byte response
+var bit line_item_received
+
+; ---------------------- Functions and Procedures --------------------------
+
+; Send a carriage return and line feed to the requester.
+procedure send_cr_lf() is
+
+   usb_serial_data = CARRIAGE_RETURN 
+   usb_serial_data = LINE_FEED
+
+end procedure
+
+
+; Send the given answer to the requester.
+procedure send_answer(byte in answer) is
+
+   usb_serial_data = "?" 
+   usb_serial_data = answer 
+   send_cr_lf()
+
+end procedure
+
+
+; Send the given repsonse to the requester and clear the request. After a
+; response, the next control state is always IDLE.
+procedure send_response(byte in response) is
+
+   usb_serial_data = response 
+   send_cr_lf()
+   ; After a response we can clear the request.
+   flush_line_buffer()
+   line_item_received = FALSE
+   control_state = CONTROL_IDLE
+
+   if defined(DEBUG) then
+      serial_debug = response
+      print_crlf(serial_debug)
+   end if 
+
+end procedure
+
+
+; Send data from the data buffer to the requester in hex ASCII.
+procedure send_data() is
+
+   ; Send the data in ASCII.
+   usb_serial_data = "?" 
+   while get_next_data_item(data) loop  
+      usb_serial_data = convert_nibble_to_ascii(data >> 4)
+      usb_serial_data = convert_nibble_to_ascii(data & 0x0F)
+   end loop
+   send_cr_lf()
+
+end procedure
+
+
+procedure reset_io_expander() is
+
+   flush_line_buffer()
+   control_state = CONTROL_IDLE
+   line_item_received = FALSE
+
+end procedure
+
+
+; ----------------------- Main Program  ----------------------------------
+enable_digital_io()
+
+if defined(DEBUG) then
+   ; Used for debugging. 
+   usart_init()
+   _usec_delay(1_000)
+   print_string(serial_debug,"Serial port initialized for debugging.\r\n")
+end if 
+
+; Setup the libraries used. We use the USB library on interrupt basis.
+usb_serial_init()
+
+; Initialize global variables.
+reset_io_expander()
+
+; Main loop starts here.
+forever loop
+
+   ; Main controller.
+   case control_state of
+    
+      CONTROL_IDLE:
+      block
+         if line_item_received then
+            ; This should be a command, parse it. If a command was
+            ; found we have to seek to the position where there is data.
+            if find_token(COMMAND_RESET) then
+               control_state = CONTROL_RESET
+            elsif find_token(COMMAND_PING) then
+               control_state = CONTROL_PING
+            elsif find_token(COMMAND_PIN_BIT_DIRECTION) then
+               control_state = CONTROL_PIN_BIT_DIRECTION
+            elsif find_token(COMMAND_PIN_BIT_MODE) then
+               control_state = CONTROL_PIN_BIT_MODE
+            elsif find_token(COMMAND_PIN_BIT_PULL_UP) then
+               control_state = CONTROL_PIN_BIT_PULL_UP
+            elsif find_token(COMMAND_PIN_BIT_WRITE) then
+               control_state = CONTROL_PIN_BIT_WRITE
+            elsif find_token(COMMAND_PIN_BIT_READ) then
+               control_state = CONTROL_PIN_BIT_READ
+            elsif find_token(COMMAND_PIN_BYTE_DIRECTION) then
+               control_state = CONTROL_PIN_BYTE_DIRECTION
+            elsif find_token(COMMAND_PIN_BYTE_WRITE) then
+               control_state = CONTROL_PIN_BYTE_WRITE
+            elsif find_token(COMMAND_PIN_BYTE_READ) then
+               control_state = CONTROL_PIN_BYTE_READ
+            elsif find_token(COMMAND_IIC_INIT) then
+               control_state = CONTROL_IIC_INIT
+            elsif find_token(COMMAND_IIC_WRITE) then
+               control_state = CONTROL_IIC_WRITE
+            elsif find_token(COMMAND_IIC_READ) then
+               control_state = CONTROL_IIC_READ
+            elsif find_token(COMMAND_DAC_INIT) then
+               control_state = CONTROL_DAC_INIT
+            elsif find_token(COMMAND_DAC_ENABLE) then
+               control_state = CONTROL_DAC_ENABLE
+            elsif find_token(COMMAND_DAC_DISABLE) then
+               control_state = CONTROL_DAC_DISABLE
+            elsif find_token(COMMAND_DAC_WRITE) then
+               control_state = CONTROL_DAC_WRITE
+            elsif find_token(COMMAND_SPI_INIT) then
+               control_state = CONTROL_SPI_INIT
+            elsif find_token(COMMAND_SPI_WRITE) then
+               control_state = CONTROL_SPI_WRITE
+            elsif find_token(COMMAND_SPI_READ) then
+               control_state = CONTROL_SPI_READ
+            elsif find_token(COMMAND_ADC_INIT) then
+               control_state = CONTROL_ADC_INIT
+            elsif find_token(COMMAND_ADC_ENABLE) then
+               control_state = CONTROL_ADC_ENABLE
+            elsif find_token(COMMAND_ADC_DISABLE) then
+               control_state = CONTROL_ADC_DISABLE
+            elsif find_token(COMMAND_ADC_READ) then
+               control_state = CONTROL_ADC_READ
+            elsif find_token(COMMAND_ADC_CHANNEL) then
+               control_state = CONTROL_ADC_CHANNEL
+            elsif find_token(COMMAND_PWM_INIT) then
+               control_state = CONTROL_PWM_INIT
+            elsif find_token(COMMAND_PWM_ENABLE) then
+               control_state = CONTROL_PWM_ENABLE
+            elsif find_token(COMMAND_PWM_DISABLE) then
+               control_state = CONTROL_PWM_DISABLE
+            elsif find_token(COMMAND_PWM_FREQUENCY) then
+               control_state = CONTROL_PWM_FREQUENCY
+            elsif find_token(COMMAND_PWM_DUTY_CYCLE) then
+               control_state = CONTROL_PWM_DUTY_CYCLE
+            else
+               ; Unknown command.
+               send_response(RESPONSE_UNKNOWN)
+            end if
+         else
+            ; Not busy, check for input USB character. The USB library has 
+            ; its own receive buffer so we can deal with some delay caused by
+            ; executing the commands.
+            if usb_serial_read(character) then
+               if defined(DEBUG) then
+                  serial_debug = character
+               end if 
+               ; We process command lines, terminated by CR + LF. Note that different
+               ; OS-es use different endings of lines. There are three options:
+               ; -) CR, LF, or CR + LF
+               ; When CR or LF is received while no data is received this will
+               ; be ignored. Spaces in the input are also ignored.
+               if (character == SPACE) then
+                  ; Ignore spaces.
+               elsif (character == CARRIAGE_RETURN) | (character == LINE_FEED) then
+                  if (items_in_line_buffer() > 0) then
+                     line_item_received = TRUE 
+                  end if
+               elsif !add_line_item(character) then
+                  ; Too many characters on one line.
+                  send_response(RESPONSE_ERROR)
+               end if
+            end if
+         end if
+       end block
+       
+      CONTROL_RESET:
+      block
+         send_response(RESPONSE_OK)
+         ; Give it some time to send the response.
+         _usec_delay(100_000)
+         asm reset
+      end block
+ 
+      CONTROL_PING:
+      block
+         send_response(RESPONSE_OK)
+      end block
+ 
+      CONTROL_PIN_BIT_DIRECTION:
+      block
+         if pin_bit_direction() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PIN_BIT_MODE:
+      block
+         if pin_bit_mode() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+     CONTROL_PIN_BIT_PULL_UP:
+      block
+         if pin_bit_pull_up() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+     CONTROL_PIN_BIT_WRITE:
+      block
+         if pin_bit_write() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PIN_BIT_READ:
+      block
+         if pin_bit_read() then
+            send_response(RESPONSE_OK)
+            send_data()
+         else
+            ; Not valid means wrong pin or pin is not an input.
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+ 
+      CONTROL_PIN_BYTE_DIRECTION:
+      block
+         if pin_byte_direction() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PIN_BYTE_WRITE:
+      block
+         if pin_byte_write() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PIN_BYTE_READ:
+      block
+         if pin_byte_read() then
+            send_response(RESPONSE_OK)
+            send_data()
+         else
+            ; Not valid means wrong pin or pin is not an input.
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+ 
+      CONTROL_IIC_INIT:
+      block
+         if iic_init() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_IIC_WRITE:
+      block
+         if iic_write() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_IIC_READ:
+      block
+         if iic_read() then
+            send_response(RESPONSE_OK)
+            send_data()
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_DAC_INIT:
+      block
+         if dac_init() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_DAC_ENABLE:
+      block
+         dac_enable()
+         send_response(RESPONSE_OK)
+      end block
+
+      CONTROL_DAC_DISABLE:
+      block
+         dac_disable()
+         send_response(RESPONSE_OK)
+      end block
+
+      CONTROL_DAC_WRITE:
+      block
+         if dac_write() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_SPI_INIT:
+      block
+         if spi_hw_init() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_SPI_WRITE:
+      block
+         if spi_write_data() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_SPI_READ:
+      block
+         if spi_read_data() then
+            send_response(RESPONSE_OK)
+            send_data()
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+ 
+      CONTROL_ADC_INIT:
+      block
+         if adc_initialize() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_ADC_ENABLE:
+      block
+         adc_enable()
+         send_response(RESPONSE_OK)
+      end block
+
+      CONTROL_ADC_DISABLE:
+      block
+         adc_disable()
+         send_response(RESPONSE_OK)
+      end block
+
+      CONTROL_ADC_READ:
+      block
+         if adc_read() then
+            send_response(RESPONSE_OK)
+            send_data()
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_ADC_CHANNEL:
+      block
+         if adc_set_channel() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PWM_INIT:
+      block
+         if pwm_initialize() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PWM_ENABLE:
+      block
+         if pwm_enable() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PWM_DISABLE:
+      block
+         if pwm_disable() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PWM_FREQUENCY:
+      block
+         if pwm_frequency() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+      CONTROL_PWM_DUTY_CYCLE:
+      block
+         if pwm_duty_cycle() then
+            send_response(RESPONSE_OK)
+         else
+            send_response(RESPONSE_ERROR)
+         end if 
+      end block
+
+   end case
+             
+end loop

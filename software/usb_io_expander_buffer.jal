@@ -1,0 +1,228 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO buffer declaration and buffer functions and procedures
+; Author: Rob Jansen, Copyright (c) 2023..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for handling the ASCII buffer.
+;              The buffer holds one line that ends with CR and/or LF.
+;
+
+; Buffer sizes.
+const byte MAX_ASCII_BUFFER = 80 ; Holds ASCII characters.
+const byte MAX_DATA_BUFFER  = 40 ; Holds binary data. 
+
+
+; The line item buffer holds the ASCII data of one line in uppercase.
+var byte line_buffer[MAX_ASCII_BUFFER]
+var byte bytes_in_line_buffer ; From 1 .. MAX_ASCII_BUFFER - 1
+var byte index_in_line_buffer ; From 0 .. bytes_in_line_buffer - 1
+
+; The data buffer holds binary data.
+var byte data_buffer[MAX_DATA_BUFFER]
+var byte bytes_in_data_buffer ; From 1 .. MAX_DATA_BUFFER - 1
+var byte index_in_data_buffer ; From 0 .. bytes_in_data_buffer - 1
+
+
+; Make character a..z uppercase if needed.
+function uppercase(byte in character) return byte is
+
+   if (character >= 0x61) & (character <= 0x7A) then
+      return (character - 0x20)
+   else
+      return character
+   end if
+
+end function
+
+
+; Convert an ASCII character in the range "0".."F" to a decimal number.
+function convert_ascii_to_hexadecimal(byte in out value) return bit is
+
+   var bit value_ok = TRUE
+   
+   if (value >= "0") & (value <= "9") then
+      value = value - 48 ; 0..9
+   elsif (value >= "A") & (value <= "F") then
+      value = value - 55 ; 10 .. 16
+   else
+      value_ok = FALSE
+   end if 
+
+   return value_ok
+
+end function
+
+
+; Convert a hexadecimal nibble to an ASCII value.
+function convert_nibble_to_ascii(byte in nibble) return byte is
+
+   if (nibble >= 10) then
+      return nibble + 55 ; "A" .. "F"
+   else
+      return nibble + 48 ; "0" .. "9"
+   end if 
+
+end function
+
+
+; Adds an item in the line item buffer. Characters a..z are stored
+; as uppercase. Returns TRUE when succesfull.
+function add_line_item(byte in item) return bit is
+
+   var bit item_stored = FALSE
+
+   if (bytes_in_line_buffer < MAX_ASCII_BUFFER) then
+      line_buffer[bytes_in_line_buffer] = uppercase(item)
+      bytes_in_line_buffer = bytes_in_line_buffer + 1
+      item_stored = TRUE
+   end if 
+
+   return item_stored
+
+end function
+
+
+; Adds an item in the data buffer. Returns TRUE when succesfull.
+function add_data_item(byte in item) return bit is
+
+   var bit item_stored = FALSE
+
+   if (bytes_in_data_buffer < MAX_DATA_BUFFER) then
+      data_buffer[bytes_in_data_buffer] = item
+      bytes_in_data_buffer = bytes_in_data_buffer + 1
+      item_stored = TRUE
+   end if 
+
+   return item_stored
+
+end function
+
+
+; Get the next line item from the buffer and move to the next line item.
+; Returns TRUE when there is an item in the buffer.
+function get_next_line_item(byte out item) return bit is
+
+   var bit item_present = FALSE
+
+   if (index_in_line_buffer < bytes_in_line_buffer) then
+      item = line_buffer[index_in_line_buffer]
+      index_in_line_buffer = index_in_line_buffer + 1
+      item_present = TRUE
+   end if 
+
+   return item_present
+
+end function
+
+
+; Get the next data from the data buffer and move to the data in the buffer.
+; Returns TRUE when there is data in the data buffer.
+function get_next_data_item(byte out item) return bit is
+
+   var bit item_present = FALSE
+
+   if (index_in_data_buffer < bytes_in_data_buffer) then
+      item = data_buffer[index_in_data_buffer]
+      index_in_data_buffer = index_in_data_buffer + 1
+      item_present = TRUE
+   end if 
+
+   return item_present
+
+end function
+
+
+; Returns the number of remaining elements in the line item buffer.
+function items_in_line_buffer() return byte is
+
+   return (bytes_in_line_buffer - index_in_line_buffer)
+
+end function 
+
+
+
+; Returns the number of remaining data byte  in the data buffer.
+function items_in_data_buffer() return byte is
+
+   return (bytes_in_data_buffer - index_in_data_buffer)
+
+end function 
+
+
+; Flush the line item buffer. 
+procedure flush_line_buffer() is
+
+  bytes_in_line_buffer = 0
+  index_in_line_buffer = 0
+
+end procedure
+
+
+; Flush the data buffer. 
+procedure flush_data_buffer() is
+
+  bytes_in_data_buffer = 0
+  index_in_data_buffer = 0
+
+end procedure
+
+; Seek to the given position in the line item buffer. If the position is larger than
+; the number of items in the line item buffer, nothing is done. Position 0 is the first
+; item in the line item buffer.
+; Not used.
+procedure seek_line_buffer(byte in position) is
+
+   if (position < bytes_in_line_buffer) then
+     index_in_line_buffer = position
+   end if 
+
+end procedure
+
+
+
+; Find the given token in the line item buffer and return TRUE if it was found. 
+; The index of the line buffer is position at the end of the found token.
+function find_token(byte in token[]) return bit is
+
+   var byte token_index = 0
+
+   index_in_line_buffer = 0
+   while (token_index < count(token)) & (index_in_line_buffer < bytes_in_line_buffer) loop
+      if (line_buffer[index_in_line_buffer] == token[token_index]) then 
+         token_index = token_index + 1
+      else
+         -- No match (yet), try again.
+         token_index = 0
+      end if  
+      index_in_line_buffer = index_in_line_buffer + 1
+   end loop
+
+   return (token_index == count(token))
+
+end function
+
+; Get a byte stored in hexadecimal ASCII from the line item buffer and return 
+; its decimal value. Returns TRUE when a valid byte was obtained from the 
+; line item buffer.
+function get_byte_from_buffer(byte out data) return bit is
+
+   var byte nibble_low, nibble_high
+   var bit command_ok = FALSE
+
+   ; Get the byte value consisting of two ASCII nibbles.
+   if get_next_line_item(nibble_high) then
+      if get_next_line_item(nibble_low) then
+         if convert_ascii_to_hexadecimal(nibble_high) then
+            if convert_ascii_to_hexadecimal(nibble_low) then
+               data = (16 * nibble_high) + nibble_low
+               command_ok = TRUE
+            end if
+         end if 
+      end if 
+   end if
+
+   return command_ok
+
+end function
+
+

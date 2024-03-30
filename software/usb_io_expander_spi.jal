@@ -1,0 +1,112 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander SPI functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for SPI control.
+;
+include usb_io_expander_pins
+include spi_master_hw  
+
+var bit _spi_initialized = FALSE
+
+; Init the SPI hardware interface. Returns TRUE when the right
+; SPI Mode  was selected.
+function spi_hw_init() return bit is
+
+   var byte item, spi_mode, spi_rate
+   var bit command_ok = TRUE
+
+   ; Get SPI mode. 
+   if get_byte_from_buffer(item) then 
+      if (item == 0) then
+         spi_mode = SPI_MODE_00
+      elsif (item == 1) then
+         spi_mode = SPI_MODE_01
+      elsif (item == 2) then
+         spi_mode = SPI_MODE_10
+      elsif (item == 2) then
+         spi_mode = SPI_MODE_11
+      else
+         command_ok = FALSE
+      end if 
+   else 
+      command_ok = FALSE
+   end if 
+
+   ; Get SPI rate.
+   if get_byte_from_buffer(item) then 
+      if (item == 0) then
+         spi_rate = SPI_RATE_FOSC_4
+      elsif (item == 1) then
+         spi_rate = SPI_RATE_FOSC_16
+      elsif (item == 2) then
+         spi_rate = SPI_RATE_FOSC_64
+      else
+         command_ok = FALSE
+      end if 
+   else 
+      command_ok = FALSE
+   end if 
+
+   ; Intialize SPI if all was well.
+   if command_ok then
+      _pin_set_direction(EXPANDER_PIN_C0, output) ; SPI SCK.
+      command_ok = command_ok & _pin_set_digital(EXPANDER_PIN_C0)
+      _pin_set_direction(EXPANDER_PIN_C1, input)  ; SPI SDI.
+      command_ok = command_ok & _pin_set_digital(EXPANDER_PIN_C1)
+      _pin_set_direction(EXPANDER_PIN_C2, output) ; SPI SDO
+      command_ok = command_ok & _pin_set_digital(EXPANDER_PIN_C2)
+      spi_init(spi_mode, spi_rate)
+      _spi_initialized = TRUE
+   else
+      _spi_initialized = FALSE
+   end if 
+
+   return command_ok
+
+end function
+
+; Write data to a slave device. Data is written until there is no data in 
+; the receive buffer. SPI must be initialized. Returns TRUE when OK.
+function spi_write_data() return bit is
+
+   var byte data
+   var bit command_ok
+
+   if _spi_initialized then 
+      while get_byte_from_buffer(data) loop
+         spi_host_hw = data
+      end loop
+      command_ok = TRUE
+   else
+      command_ok = FALSE
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Read data from a slave device. The number of bytes to read is 
+; given in the line item buffer. The data is returned in the data buffer. 
+; SPI must be initialized.
+function spi_read_data() return bit is
+
+   var byte nr_of_bytes, data
+   var bit command_ok
+
+   ; Byte in buffer is the number of bytes to write.
+   command_ok = get_byte_from_buffer(nr_of_bytes) & _spi_initialized
+   flush_data_buffer()
+   while (command_ok & (nr_of_bytes > 0)) loop
+      nr_of_bytes = nr_of_bytes - 1
+      data = spi_host_hw
+      ; Store it (if there is still room in the buffer).
+      command_ok = add_data_item(data)
+   end loop
+   return command_ok
+
+end function
+
+

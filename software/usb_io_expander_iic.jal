@@ -1,0 +1,99 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander IIC functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for IIC control.
+;
+include usb_io_expander_pins
+
+; Settings for the IIC interface.
+var word _i2c_bus_speed = 1 ; Default 100 kHz
+const bit _i2c_level = TRUE ; i2c levels (not SMB)
+const word I2C_HARDWARE_TIMEOUT = 10_000 ; 10 ms.
+include i2c_hardware  
+
+var bit _iic_initialized = FALSE
+
+; Init the iic hardware interface. Returns TRUE when the right
+; IIC bus speed was selected.
+function iic_init() return bit is
+
+   var byte bus_speed
+   var bit command_ok = FALSE
+
+   ; Get IIC bus speed. 
+   if get_byte_from_buffer(bus_speed) then
+      if (bus_speed == 0x00) | (bus_speed == 0x01) | 
+         (bus_speed == 0x04) | (bus_speed == 0x0A) then
+         _i2c_bus_speed = bus_speed
+         ; IIC pins must both be set to input.
+         _pin_set_direction(EXPANDER_PIN_C0, input) ; IIC SCL
+         command_ok = _pin_set_digital(EXPANDER_PIN_C0)
+         _pin_set_direction(EXPANDER_PIN_C1, input) ; IIC SDA
+         command_ok = command_ok & _pin_set_digital(EXPANDER_PIN_C1)
+         i2c_initialize()
+         _iic_initialized = TRUE
+         command_ok = TRUE
+      end if
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Write IIC data to an IIC slave device. Data is written until
+; there is no data in the receive buffer. IIC must be initialized.
+function iic_write() return bit is
+
+   var byte slave_address, data
+   var bit command_ok, data_available
+
+   i2c_start()
+   command_ok = get_byte_from_buffer(slave_address) & _iic_initialized
+   command_ok = command_ok & i2c_transmit_byte(slave_address)
+   data_available = TRUE
+   while (command_ok & data_available) loop
+      if get_byte_from_buffer(data) then
+         command_ok = i2c_transmit_byte(data)
+      else
+         data_available = FALSE
+      end if 
+   end loop
+   i2c_stop()
+
+   return command_ok
+
+end function
+
+; Read IIC data from an IIC slave device. The number 
+; of bytes to read is given in the line item buffer. The data is
+; returned in the data buffer. IIC must be initialized.
+function iic_read() return bit is
+
+   var byte slave_address, nr_of_bytes, data
+   var bit command_ok
+
+   i2c_start()
+   command_ok = get_byte_from_buffer(slave_address) & _iic_initialized
+   command_ok = command_ok & i2c_transmit_byte(slave_address | 0b0000_0001)  
+   flush_data_buffer()
+   command_ok = command_ok & get_byte_from_buffer(nr_of_bytes)
+   while (command_ok & (nr_of_bytes > 0)) loop
+      nr_of_bytes = nr_of_bytes - 1
+      if (nr_of_bytes == 0) then
+         ; Last byte, send NACK.
+         data  = i2c_receive_byte(FALSE) ; Nack.
+       else
+         data = i2c_receive_byte(TRUE) ;  Ack.
+      end if 
+      ; Store it (if there is still room in the buffer).
+      command_ok = add_data_item(data)
+   end loop
+   i2c_stop()
+
+   return command_ok
+
+end function
+

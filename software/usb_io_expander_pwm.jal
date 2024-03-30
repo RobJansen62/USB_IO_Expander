@@ -1,0 +1,145 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander Analog to Pulse Width Modulation (PWM) functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:  jalv25r8 
+; 
+; Description: Functions and procedures for PWM control. 
+; 
+;
+
+include pwm_hardware
+
+var bit _pwm_initialized = FALSE
+
+; Init the PWM hardware with the given channel. The PWM duty cycle is set
+; to 50% and to maximum resolution. The PWM is disabled. Returns TRUE when OK.
+function pwm_initialize() return bit is
+
+   var byte channel
+   var bit command_ok = FALSE
+
+   if get_byte_from_buffer(channel) then 
+      if (channel == 1) then
+         pwm1_off()
+          _pin_set_direction(EXPANDER_PIN_C5, output)
+         pwm1_set_dutycycle_percent(50)
+         _pwm_initialized = TRUE
+         pwm_max_resolution(1)
+         command_ok = TRUE
+      elsif (channel == 2) then
+         pwm2_off()
+         _pin_set_direction(EXPANDER_PIN_C3, output)
+         -- Pin C3 can be analog, set to digital.
+         command_ok = _pin_set_digital(EXPANDER_PIN_C3)
+         pwm2_set_dutycycle_percent(50)
+         _pwm_initialized = TRUE
+         pwm_max_resolution(1)
+      end if 
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Set the PWM frequency to the given frequency in the item buffer. 
+; Frequency is set on all channels.
+; Since the range is 750 Hz to 45 kHz (see pwm_common.jal) we only
+; need a word for the frequency. Returns TRUE if OK.
+function pwm_frequency() return bit is
+
+   var dword frequency = 0
+   var byte data
+   var bit command_ok
+
+   ; Channel must be initialized.
+   command_ok = _pwm_initialized
+   for 2 loop
+      frequency = frequency << 8
+      command_ok = command_ok & get_byte_from_buffer(data)
+      frequency = frequency | dword(data)
+   end loop
+
+   if (frequency >= 750) & (frequency <= 45_000) &
+      command_ok then
+      pwm_set_frequency(frequency)
+   else
+      command_ok = FALSE
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Set the PWM duty cycle for the given channel with the given percentage.
+; Duty cycle in percentage from 0 .. 100. Returns TRUE if OK.
+function pwm_duty_cycle() return bit is
+
+   var byte duty_cycle, channel
+   var bit command_ok
+
+   command_ok = get_byte_from_buffer(channel) & _pwm_initialized
+   command_ok = command_ok & get_byte_from_buffer(duty_cycle)
+   if command_ok & (duty_cycle <= 100) then
+      if (channel == 1) then
+         _pin_set_direction(EXPANDER_PIN_C5, output)
+         pwm1_set_dutycycle_percent(duty_cycle)
+      elsif (channel == 2) then
+         _pin_set_direction(EXPANDER_PIN_C3, output)
+         -- Pin C3 can be analog, set to digital.
+         command_ok = _pin_set_digital(EXPANDER_PIN_C3)
+         pwm2_set_dutycycle_percent(duty_cycle)
+      else
+         command_ok = FALSE
+      end if 
+   end if 
+
+   return command_ok
+
+end function
+
+
+; Enable the given PWM channel. Returns TRUE when OK
+function pwm_enable() return bit is
+
+   var byte channel
+   var bit command_ok
+   
+   command_ok = _pwm_initialized
+   if get_byte_from_buffer(channel) then 
+      if (channel == 1) then
+         pwm1_on()
+         command_ok = TRUE
+      elsif (channel == 2) then
+         pwm2_on()
+         command_ok = TRUE
+      end if 
+   end if 
+
+   return command_ok
+       
+end function
+
+
+; Disable the given PWM channel. Returns TRUE when OK
+function pwm_disable() return bit is
+
+   var byte channel
+   var bit command_ok
+
+   command_ok = _pwm_initialized
+   if get_byte_from_buffer(channel) then 
+      if (channel == 1) then
+         pwm1_off()
+         command_ok = TRUE
+      elsif (channel == 2) then
+         pwm2_off()
+         command_ok = TRUE
+      end if 
+   end if 
+
+   return command_ok
+       
+end function
+

@@ -1,0 +1,23 @@
+; -----------------------------------------------------------------------------
+; Title: USB IO Expander USART (serial) functions and procedures
+; Author: Rob Jansen, Copyright (c) 2024..2024, all rights reserved.
+; Compiler:   
+; 
+; Description: USART initialization. Only used for debugging.
+;
+
+; Settings for the USART (serial) interface.
+const serial_hw_baudrate = 115_200
+alias pin_RX_direction is pin_RX_DT_direction
+alias pin_TX_direction is pin_TX_CK_direction
+include serial_hw_int_cts
+
+alias serial_debug is serial_hw_data
+
+; Init the USART hardware interface. 
+procedure usart_init() is
+   
+    serial_hw_init()
+
+end procedure
+
