@@ -23,3 +23,5 @@ A detailed manual is available describing how to operate the device. Also a powe
 # Tools
 A Python library is available including various Python script that demonstrate the functionality of the device.
 
+# Video
+The is a [demonstration video](370273) that you can watch. 
