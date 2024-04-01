@@ -11,7 +11,7 @@ import sys
 from usb_io_expander import default_comport, get_default_comport, serial_init, serial_end, iic_init, \
                             iic_write, iic_read
 
-slave_address = 0xAE
+device_address = 0xAE
 
 # The EEPROM write data start with the sub address and the data to be written.
 eeprom_write_data = [0x00, # Word high byte sub address
@@ -42,19 +42,19 @@ if __name__ == "__main__":
         print("Could not initialize IIC interface")
         sys.exit(1)
 
-    if iic_write(slave_address, eeprom_write_data):
+    if iic_write(device_address, eeprom_write_data):
         print("IIC data written.")
     else:
         print("Could not write IIC data.")
         sys.exit(1)
 
-    if iic_write(slave_address, [0, 0]):  # Sub address is word.
+    if iic_write(device_address, [0, 0]):  # Sub address is word.
         print("Resetting the sub address.")
     else:
         print("Could not write sub address.")
         sys.exit(1)
 
-    command_ok, iic_data = iic_read(slave_address, 20)
+    command_ok, iic_data = iic_read(device_address, 20)
     if command_ok:
         print("IIC data read.")
         for data in iic_data:
